@@ -1,0 +1,434 @@
+---
+title: "R Notebook"
+output:
+  word_document: default
+  pdf_document:
+    latex_engine: xelatex
+  html_notebook: default
+always_allow_html: yes
+---
+
+Our objective is to develop models to predict the outcome variable “BadBuy”, which labels whether a car purchased at an auction was a “bad buy” (lemon). Our task is to build a model to guide auto dealerships in their decisions on whether to bid for and purchase a vehicle.
+
+```{r setup, include=FALSE}
+
+# This chunk shows/hides the code in your final report. When echo = TRUE, the code
+# is shown in the report. When echo = FALSE, the code is hidden from the final report.
+# We would like to see your code, so please leave the setting as is during the course.
+# This chunk will not show up in your reports, so you can safely ignore its existence.
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+The following is your first chunk to start with. Remember, you can add chunks using the menu
+above (Insert -> R) or using the keyboard shortcut Ctrl+Alt+I. A good practice is to use
+different code chunks to answer different questions. You can delete this comment if you like.
+
+Other useful keyboard shortcuts include Alt- for the assignment operator, and Ctrl+Shift+M
+for the pipe operator. You can delete these reminders if you don't want them in your report.
+
+We will use carvana.csv which contains data from 10,062 car auctions as provided by Carvana.
+Auto dealers purchase used cars at auctions with a plan to sell them to consumers, but
+sometimes these auctioned vehicles can have severe issues that prevent them from being
+resold at a profit (hence, lemons). The data contains information about each auctioned vehicle.
+
+Data preparation:
+```{r}
+#setwd("C:/") #Don't forget to set your working directory before you start!
+
+library("tidyverse")
+library("tidymodels")
+library("plotly")
+library("skimr")
+library("caret")
+```
+1.a.
+à Data has 10061 records with 10 columns. Out of it Auction, Make, Color, WheelType, Size are factor variables and Age, Odo, MMRAuction, MMRAretail are numerical variables. Wheeltype and Color have Null values. Badbuy is dependent variable. It is right now of type int, we will run linear probability and classification models on it to analyze it further.
+```{r}
+dfc = read.csv("As-3.csv")
+skim(dfc)
+```
+1.b.Set the seed to 52156. Randomly split the dataset into a training dataset and a test dataset. Use 65% of the data for training and hold out the remaining 35% for testing.
+```{r}
+set.seed(52156)
+dfcTrain <- dfc %>% sample_frac(.65)
+dfcTest <- dplyr::setdiff(dfc, dfcTrain)
+head(dfc)
+```
+2.a Exploratory analysis of the training data set
+```{r}
+plot1 <-
+   dfc %>%
+   ggplot() + geom_boxplot(aes(y = MMRAauction , x = factor(BadBuy)))
+plot1
+head(dfc)
+
+plot2 <-
+   dfc %>%
+   ggplot() + geom_boxplot(aes(y = Age , x = factor(BadBuy)))
+plot2
+
+plot3 <-
+   dfc %>%
+   ggplot() + geom_boxplot(aes(y = Odo , x = factor(BadBuy)))
+plot3
+```
+BadBuy Vs Auction: Price à Median auction price for cars not lemon are higher than that of good buy cars. There are so many outliers in the boxplot of lemon cars, showing that some of the cars with high auction prices turned into bad investment in future. 
+BadBuy Vs Ageà: For lemon cars median age is comparatively higher than that of not lemon cars, which is as expected because cars with higher age are more inclined to be lemon.
+BadBuy Vs Odo: Median distance reading given by odometer is almost same for
+lemon and non-lemon cars. But for lemon it’s slightly more, which shows that with high distance cars have undergone some problems. Also, thing to notice here is there are so many outliers with less distance covered though those cars resulted into lemon.
+
+2.b.
+```{r}
+dfcTrain %>% 
+  group_by(Size, BadBuy) %>%
+  tally() %>% 
+  mutate(pct = 100*n/sum(n))
+```
+```{r}
+dfcTrain %>% 
+  group_by(BadBuy, Size) %>%
+  tally() %>% 
+  mutate(pct = 100*n/sum(n)) %>% 
+  arrange(desc(BadBuy), desc(pct))
+```
+i) Which size of vehicle contributes the most to the number of lemons? (That is, which vehicle size has the highest percentage of the total lemons?)
+àMEDIUM Size of vehicles contribute to most lemons.
+
+ii) Because the vehicles of the size you identified in (i) contribute so much to the number of lemons, would you suggest the auto dealership stop purchasing vehicles of that size? Why or why not?
+I will not suggest not to stop buy those, because even if out of total medium cars 1298 are lemon but 1348 are good cars. Hence if we stop buying them, we might lose the other good car deals from the same category.
+
+3.a.Compute and report the RMSE using your model for both the training and the test data sets. Use the predicted values from the regression equation.
+
+```{r}
+str(dfcTrain)
+```
+
+```{r}
+fitLPM <- lm(formula = BadBuy ~ . , data = dfcTrain)
+summary(fitLPM)
+#plot(fitLPM)
+```
+```{r}
+#RMSE and MAE for test
+resultlpmtest <- dfcTest %>%
+  			mutate(predictedtest = predict(fitLPM, dfcTest))
+resultlpmtest
+
+performance <- 
+   metric_set(rmse, mae)
+performance(resultlpmtest, truth= BadBuy, estimate = predictedtest)
+```
+```{r}
+##RMSE and MAE for train
+resultlpmtrain <- dfcTrain %>%
+  			mutate(predictedtrain = predict(fitLPM, dfcTrain))
+resultlpmtrain
+
+performance <- 
+   metric_set(rmse, mae)
+performance(resultlpmtrain, truth= BadBuy, estimate = predictedtrain)
+```
+b) For which dataset is the error smaller? Does this surprise you? Why or why not?
+
+for training dataset error are smaller. It does not surprise me, because as the
+model is trained on the same dataset it is more inclined towards capturing the
+patterns in training dataset as a result making low prediction errors.
+
+c.Use a cutoff of 0.5 and do the classification in the test data. Compute and report the
+confusion matrix
+```{r}
+resultslpm <-
+	lm(formula = BadBuy ~ . , data = dfcTrain) %>% 
+  predict(dfcTest, type  = 'response') %>%  
+  bind_cols(dfcTest, predictedProb=.) %>% 
+  mutate(predictedclass = as.factor(ifelse(predictedProb>0.5,1,0)))
+
+resultslpm %>% 
+  group_by(BadBuy) %>% 
+  tally() %>% 
+  mutate(pct = 100*n/sum(n))
+
+resultslpm %>% 
+  group_by(predictedclass) %>% 
+  tally() %>% 
+  mutate(pct = 100*n/sum(n))
+
+resultslpm$BadBuy <- as.factor(resultslpm$BadBuy)
+
+resultslpm %>% 
+  conf_mat(truth = BadBuy ,estimate = predictedclass) %>% 
+  autoplot(type = 'heatmap')
+```
+i) Which type of errors (false positives and false negatives) occur more here?
+FALSE NEGATIVE (FN) error occur more here total 743
+
+ii) For this problem, do you think a false positive or a false negative is a more
+serious error? Based on your answer, which metric makes a better objective? Out of FP and FN, FN are critical for business, because even if the car is badbuy model suggest to buy that car which can cause so much of loss in future. Sensitivity is important metric here, To minimize, FN metric makes better objective as it will be more costly to make FN errors during predictions.
+
+Accuracy = (TP + TN) / (TP+TN+FP+FN)
+= (1374+996)/(1374+996+743+408)
+= 67.3 %
+
+e.
+```{r}
+newdata = data.frame(Auction="ADESA", Age=1, Make="HONDA",Color="SILVER", WheelType="Covers",Odo=10000, Size="LARGE",MMRAauction=8000, MMRAretail=10000)
+
+predict(fitLPM, newdata, type="response")
+```
+Does the probability your model calculates make sense? Why or why not?
+àNo, the probability calculated by the model does not makes sense. Because
+giving negative -0.14. which is unrealistic.
+
+4.Run a logistic regression model to predict a lemon using all other variables.
+```{r}
+dfcTrain$BadBuy  <- as.factor(dfcTrain$BadBuy)
+dfcTest$BadBuy  <- as.factor(dfcTest$BadBuy)
+str(dfcTrain)
+
+fitglm <- train(BadBuy ~ ., data = dfcTrain, family = 'binomial',  method = 'glm') %>% 
+  predict(dfcTest, type = 'raw') %>% 
+  bind_cols(dfcTest, predictedProb = .)
+summary(fitglm)
+```
+we received rank-deficient error. Because our data contains insufficient information present in dataset or null values. Here as we see color variable has null values which needs to be handled to remove this error. Also, Make has less number of count for some categories which we need to modify and convert into Other category to avoid this error.
+
+4.a.i
+```{r}
+dfc$Color <- as.character(dfc$Color)
+str(dfc)
+
+dfc$Color[dfc$Color == "NULL"] <- "NOTAVAIL"
+```
+
+```{r}
+dfc %>% 
+  group_by(Make) %>% 
+  tally()
+
+```
+4.a.2
+```{r}
+# Recode Make - ACURA, CADILLAC, VOLVO, SUBARU, MINI, LEXUS as OTHER
+dfc$Make <- as.character(dfc$Make)
+dfc <- dfc %>% 
+  mutate(Make = if_else(Make %in% c("ACURA", "CADILLAC", "VOLVO", "SUBARU","MINI", "LEXUS", NA), "OTHER", Make))
+dfc$BadBuy <- as.factor(dfc$BadBuy)
+
+
+set.seed(52156)
+dfcTrain1 <- dfc %>% sample_frac(.65)
+dfcTest1 <- dplyr::setdiff(dfc, dfcTrain1)
+dfc
+```
+```{r}
+table(dfc$Make)
+```
+
+
+```{r}
+
+str(dfcTrain1)
+sum(is.na(dfcTrain1))
+new_data <- dfcTrain1 %>% filter_all(any_vars(is.na(.))) 
+new_data
+fitglm1 <- train(BadBuy ~ ., data = dfcTrain1, family = 'binomial',  method = 'glm')
+```
+```{r}
+fitglm1 <- glm(formula = BadBuy ~ ., family = binomial(), data = dfcTrain1)
+summary(fitglm1)
+```
+b.
+```{r}
+exp(coef(fitglm1))
+```
+
+d.
+```{r}
+resultsglm <-
+	glm(formula = BadBuy ~ . ,family= 'binomial', data = dfcTrain1) %>% 
+  predict(dfcTest1, type  = 'response') %>%  
+  bind_cols(dfcTest1, predictedProb=.) %>% 
+  mutate(predictedclass = as.factor(ifelse(predictedProb>0.5,1,0)))
+
+resultsglm %>% 
+  group_by(BadBuy) %>% 
+  tally() %>% 
+  mutate(pct = 100*n/sum(n))
+
+resultsglm %>% 
+  group_by(predictedclass) %>% 
+  tally() %>% 
+  mutate(pct = 100*n/sum(n))
+
+resultsglm %>% 
+  conf_mat(truth = BadBuy ,estimate = predictedclass) %>% 
+  autoplot(type = 'heatmap') 
+```
+
+e.
+
+```{r}
+newdata = data.frame(Auction="ADESA", Age=1, Make="HONDA",Color="SILVER", WheelType="Covers",Odo=10000, Size="LARGE",MMRAauction=8000, MMRAretail=10000)
+
+predict(fitglm1, newdata, type="response")
+```
+the result makes more sense, it shows the probability of such car being lemon is very low that is 4.15%. It makes more sense than 3e model, because in 3e we are using linear probability model on data but logistic model gives probability value instead of some random negative value.
+
+5.Explore alternative classification methods to improve your predictions.
+a.
+
+```{r}
+str(dfcTrain1)
+```
+
+```{r}
+set.seed(123)
+fitlda <- train(form = BadBuy ~ ., family= "binomial", data=dfcTrain1, method="lda", trControl = trainControl(method='cv', number=10))
+
+```
+i.
+```{r}
+resultslda <-
+	train(form = BadBuy ~ ., family= "binomial", data=dfcTrain1, method="lda", trControl = trainControl(method='cv', number=10)) %>%
+  predict(dfcTest1, type  = 'raw') %>%  
+  bind_cols(dfcTest1, predictedclass=.)
+resultslda
+
+resultslda %>% 
+  xtabs(~predictedclass+BadBuy, .) %>% 
+  confusionMatrix(Positive = '1')
+```
+
+b.
+i.
+```{r}
+set.seed(123)
+
+knnFit <- train(BadBuy ~ ., data = dfcTrain1, method = "knn", trControl = trainControl(method='cv', number=10),preProcess = c("center", "scale"), tuneLength = 10)
+
+knnFit
+#resultsknn %>% 
+#  xtabs(~predictedclass+BadBuy, .) %>% 
+# confusionMatrix(Positive = '1')
+```
+ii.
+```{r}
+plot(knnFit)
+```
+
+iii.
+```{r}
+resultsknn <-
+	train(BadBuy ~ ., data = dfcTrain1, method = "knn", trControl = trainControl(method='cv', number=10), tuneLength = 10) %>% 
+  predict(dfcTest1, type  = 'raw') %>%  
+  bind_cols(dfcTest1, predictedclass=.)
+resultsknn
+
+resultsknn %>% 
+  xtabs(~predictedclass+BadBuy, .) %>% 
+  confusionMatrix(Positive = '1')
+```
+
+c.
+i.
+```{r}
+
+library("glmnet")
+#Set the grid for the lambda values
+lambdaValues <- 10^seq(-5, 2, length = 100)
+
+set.seed(123)
+
+fitLasso <- train(BadBuy ~ ., family='binomial', data=dfcTrain1, method='glmnet', trControl=trainControl(method='cv', number=10), tuneGrid = expand.grid(alpha=1, lambda=lambdaValues))
+```
+
+```{r}
+#Variable importance complete table
+varImp(fitLasso)$importance %>%    # Add scale=FALSE inside VarImp if you don't want to scale
+  rownames_to_column(var = "Variable") %>%
+  mutate(Importance = scales::percent(Overall/100)) %>% 
+  arrange(desc(Overall)) %>% 
+  as_tibble()
+
+```
+```{r}
+#Variable importance plot with the most important variables
+plot(varImp(fitLasso), top = 25)    # Add top = XX to change the number of visible variables
+```
+```{r}
+#Optimum lambda selected by the algorithm
+fitLasso$bestTune$lambda
+
+```
+iv.
+```{r}
+resultsLasso <- 
+  fitLasso %>%
+  predict(dfcTest1, type='raw') %>%
+  bind_cols(dfcTest1, predictedClass=.)
+
+resultsLasso %>% 
+  xtabs(~predictedClass+BadBuy, .) %>% 
+  confusionMatrix(positive = '1')
+```
+d.
+i.
+```{r}
+set.seed(123)
+fitLassoRidge <- train(BadBuy ~ ., family='binomial', data=dfcTrain1, method='glmnet', trControl=trainControl(method='cv', number=10), tuneGrid = expand.grid(alpha=0, lambda=lambdaValues))
+
+resultsLassoRidge <- 
+  fitLassoRidge %>%
+  predict(dfcTest1, type='raw') %>%
+  bind_cols(dfcTest1, predictedClass=.)
+
+resultsLassoRidge %>% 
+  xtabs(~predictedClass+BadBuy, .) %>% 
+  confusionMatrix(positive = '1')
+```
+
+```{r}
+set.seed(123)
+fitElasticNet <- train(BadBuy ~ ., family='binomial', data=dfcTrain1, method='glmnet', trControl=trainControl(method='cv', number=10), tuneLength=10)
+
+resultsElasticNet <- 
+  fitElasticNet %>%
+  predict(dfcTest1, type='raw') %>%
+  bind_cols(dfcTest1, predictedClass=.)
+
+resultsElasticNet %>% 
+  xtabs(~predictedClass+BadBuy, .) %>% 
+  confusionMatrix(positive = '1')
+```
+e.
+i.
+```{r}
+set.seed(123)
+
+fitqda <- train(form = BadBuy ~ ., family= "binomial", data=dfcTrain1, method="qda", trControl = trainControl(method='cv', number=10))
+
+```
+```{r}
+str(dfcTrain1)
+```
+
+```{r}
+
+# as Make and MMRAauction are having collinearity with other variable, like Auction and MMRAuction. We will remove it from the model IV's
+set.seed(123)
+
+resultQDA <-
+  train(BadBuy~.-Make-MMRAauction, family = 'binomial', method = 'qda', data = dfcTrain1, trControl = trainControl(method = "cv", number = 10)) %>% 
+  predict(dfcTest1, type = 'raw') %>% 
+  bind_cols(dfcTest1, predictedClass=.)
+
+resultQDA %>% 
+  xtabs(~predictedClass+BadBuy, .) %>% 
+  confusionMatrix(positive = '1')
+```
+Out of all the models given above, Ridge model performs better than any other model. Because sensitivity and total number of false negatives are less than that of other models for ridge model.
+
+
